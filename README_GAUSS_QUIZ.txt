@@ -42,3 +42,18 @@ Hinweis
 bei Gauß häufig mehrere mathematisch zulässige Wege. Die beiden Distraktoren sind
 zulässige bzw. plausible Umformungen, erfüllen aber das aktuelle Teilziel nicht so
 unmittelbar wie die festgelegte optimale Aktion.
+
+Änderungen: Navigation und Rechenoperationszähler
+-------------------------------------------------
+- Schaltfläche "Zurück" ist in allen Rechenansichten verfügbar.
+- Nach einem korrekten Schritt stellt "Zurück" Matrix, Strategie, Schrittzahl und
+  Operationszähler auf den vorherigen Zustand zurück.
+- Aus einem Hinweis führt "Zurück" zur unveränderten Auswahl desselben Schritts.
+- Rechenschritte mit Zeilenaddition werden mit Zielzeile links dargestellt,
+  z. B. III ← 2 · II + III.
+- "Anzahl Rechenoperationen" zählt skalare arithmetische Operationen auf der
+  erweiterten Matrix: Skalierung = eine Multiplikation je Eintrag;
+  Zeilenaddition = eine Multiplikation plus eine Addition/Subtraktion je Eintrag;
+  Zeilentausch = 0 arithmetische Operationen.
+- Bei 3 Unbekannten besitzt die erweiterte Matrix 4 Spalten. Deshalb zählt z. B.
+  III ← 2 · II + III als 4 Multiplikationen + 4 Additionen = 8 Rechenoperationen.

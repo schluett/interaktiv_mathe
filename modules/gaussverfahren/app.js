@@ -1,6 +1,7 @@
 const stage = document.getElementById("gaussStage");
 const statusLine = document.getElementById("statusLine");
 const restartButton = document.getElementById("restartButton");
+const backButton = document.getElementById("backButton");
 const equationViewButton = document.getElementById("equationViewButton");
 const matrixViewButton = document.getElementById("matrixViewButton");
 
@@ -119,6 +120,8 @@ let feedbackOption = null;
 let resultState = null;
 let stepNumber = 0;
 let operationHistory = [];
+let operationCount = 0;
+let stateHistory = [];
 let inputError = "";
 
 function resetState() {
@@ -132,6 +135,8 @@ function resetState() {
   resultState = null;
   stepNumber = 0;
   operationHistory = [];
+  operationCount = 0;
+  stateHistory = [];
   inputError = "";
   render();
 }
@@ -170,6 +175,82 @@ function applyOperations(target, operations) {
       addRowMultiple(target, operation.source, operation.target, operation.factor);
     }
   });
+}
+
+// Zähler für skalare Rechenoperationen auf der erweiterten Matrix.
+// Bei einer Zeilenaddition werden pro Eintrag eine Multiplikation und
+// eine Addition/Subtraktion gezählt; bei einer Skalierung eine Multiplikation.
+// Ein Zeilentausch enthält keine arithmetische Rechenoperation.
+function arithmeticCost(operations) {
+  return operations.reduce((total, operation) => {
+    if (operation.kind === "scale") return total + COLS;
+    if (operation.kind === "add") return total + 2 * COLS;
+    return total;
+  }, 0);
+}
+
+function snapshotState() {
+  return {
+    matrix: cloneMatrix(matrix),
+    strategy: { ...strategy },
+    currentPlan,
+    currentOptions,
+    resultState,
+    stepNumber,
+    operationHistory: operationHistory.slice(),
+    operationCount,
+    screen
+  };
+}
+
+function restoreState(snapshot) {
+  matrix = cloneMatrix(snapshot.matrix);
+  strategy = { ...snapshot.strategy };
+  currentPlan = snapshot.currentPlan;
+  currentOptions = snapshot.currentOptions;
+  resultState = snapshot.resultState;
+  stepNumber = snapshot.stepNumber;
+  operationHistory = snapshot.operationHistory.slice();
+  operationCount = snapshot.operationCount;
+  feedbackOption = null;
+  screen = snapshot.screen;
+}
+
+function returnToInput() {
+  screen = "input";
+  matrix = null;
+  strategy = null;
+  currentPlan = null;
+  currentOptions = [];
+  feedbackOption = null;
+  resultState = null;
+  stepNumber = 0;
+  operationHistory = [];
+  operationCount = 0;
+  stateHistory = [];
+  inputError = "";
+  render();
+}
+
+function goBack() {
+  if (screen === "input") return;
+
+  // Aus einem Hinweis geht es zunächst zur unveränderten Auswahl zurück.
+  if (screen === "feedback") {
+    feedbackOption = null;
+    screen = "quiz";
+    render();
+    return;
+  }
+
+  if (stateHistory.length) {
+    restoreState(stateHistory.pop());
+    render();
+    return;
+  }
+
+  // Vor dem ersten Rechenschritt führt Zurück wieder zur Koeffizienteneingabe.
+  returnToInput();
 }
 
 function findContradictionRow(target) {
@@ -445,7 +526,8 @@ function formatCombinedOperations(operations) {
     else if (factor.isMinusOne()) sourceTerm = `−${source}`;
     else sourceTerm = `${factor.toString()} · ${source}`;
 
-    return `${sourceTerm} + ${target}`;
+    // Zielzeile bewusst links: III ← 2 · II + III.
+    return `${target} ← ${sourceTerm} + ${target}`;
   }).join("; ");
 }
 
@@ -497,7 +579,12 @@ function selectOption(index) {
     return;
   }
 
+  // Zustand vor dem Rechenschritt sichern, damit Zurück die Matrix und
+  // den Operationszähler exakt auf den vorherigen Stand setzt.
+  stateHistory.push(snapshotState());
+
   applyOperations(matrix, option.operations);
+  operationCount += arithmeticCost(option.operations);
   operationHistory.push(currentPlan.correctLabel);
   stepNumber += 1;
   currentPlan = nextPlan();
@@ -526,6 +613,8 @@ function confirmInput() {
     strategy = createStrategy();
     stepNumber = 0;
     operationHistory = [];
+    operationCount = 0;
+    stateHistory = [];
     inputError = "";
     resultState = null;
     currentPlan = nextPlan();
@@ -556,29 +645,37 @@ function updateInputValue(event) {
 function render() {
   equationViewButton.classList.toggle("is-selected", viewMode === "equation");
   matrixViewButton.classList.toggle("is-selected", viewMode === "matrix");
+  backButton.disabled = screen === "input";
+
+  const setStatus = label => {
+    statusLine.innerHTML = `
+      <span>${escapeHTML(label)}</span>
+      <span class="gauss-operation-count">Anzahl Rechenoperationen: <strong>${operationCount}</strong></span>
+    `;
+  };
 
   if (screen === "input") {
-    statusLine.textContent = "Eingabe";
+    setStatus("Eingabe");
     stage.innerHTML = renderInputScreen();
     bindStageEvents();
     return;
   }
 
   if (screen === "quiz") {
-    statusLine.textContent = `Schritt ${stepNumber + 1} · ${currentPlan.phase}`;
+    setStatus(`Schritt ${stepNumber + 1} · ${currentPlan.phase}`);
     stage.innerHTML = renderQuizScreen();
     bindStageEvents();
     return;
   }
 
   if (screen === "feedback") {
-    statusLine.textContent = `Schritt ${stepNumber + 1} · Hinweis`;
+    setStatus(`Schritt ${stepNumber + 1} · Hinweis`);
     stage.innerHTML = renderFeedbackScreen();
     bindStageEvents();
     return;
   }
 
-  statusLine.textContent = "Ergebnis";
+  setStatus("Ergebnis");
   stage.innerHTML = renderResultScreen();
   bindStageEvents();
 }
@@ -860,6 +957,7 @@ matrixViewButton.addEventListener("click", () => {
   render();
 });
 
+backButton.addEventListener("click", goBack);
 restartButton.addEventListener("click", resetState);
 
 stage.addEventListener("keydown", event => {

@@ -1489,3 +1489,63 @@ button:active {
     width: 44px;
   }
 }
+
+/* Gauß-Quiz: Rücknavigation und Operationszähler */
+.gauss-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.gauss-back-button,
+.gauss-back-button:first-child {
+  padding: 8px 11px;
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--primary);
+  font-size: 0.9rem;
+  box-shadow: none;
+}
+
+.gauss-back-button:hover:not(:disabled),
+.gauss-back-button:focus-visible:not(:disabled),
+.gauss-back-button:first-child:hover:not(:disabled),
+.gauss-back-button:first-child:focus-visible:not(:disabled) {
+  border-color: var(--primary);
+  background: #f2f6f8;
+  color: var(--primary-dark);
+}
+
+.gauss-back-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gauss-quiz-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: baseline;
+}
+
+.gauss-operation-count {
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.gauss-operation-count strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .gauss-toolbar-actions {
+    justify-content: flex-start;
+  }
+
+  .gauss-quiz-status {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+}
