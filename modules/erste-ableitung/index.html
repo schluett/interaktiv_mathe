@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Erste Ableitung – Mathematik</title>
+  <link rel="stylesheet" href="../../styles.css">
+</head>
+<body class="app-module">
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="site-title" href="../../index.html">Mathematik</a>
+      <a class="back-link" href="../../index.html">Übersicht</a>
+    </div>
+  </header>
+
+  <main class="module-shell">
+    <div class="module-heading">
+      <span class="module-category">Analysis</span>
+      <h1>Erste Ableitung</h1>
+    </div>
+
+    <section class="lab-card" aria-label="Interaktive Darstellung der ersten Ableitung">
+      <canvas id="gameCanvas" width="900" height="520"></canvas>
+
+      <div class="control-row">
+        <button type="button" onclick="moveBack()">◀ Zurück</button>
+        <button type="button" onclick="moveForward()">Weiter ▶</button>
+      </div>
+
+      <div class="info-panel" id="info"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Sebastian Schlütter · Hochschule Mainz
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gaußverfahren – Mathematik</title>
+  <link rel="stylesheet" href="../../styles.css">
+</head>
+<body class="app-module">
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="site-title" href="../../index.html">Mathematik</a>
+      <a class="back-link" href="../../index.html">Übersicht</a>
+    </div>
+  </header>
+
+  <main class="module-shell">
+    <div class="module-heading">
+      <span class="module-category">Lineare Algebra</span>
+      <h1>Gaußverfahren</h1>
+    </div>
+
+    <section class="lab-card gauss-lab" aria-label="Schrittweise Rechnung zum Gaußverfahren">
+      <div class="gauss-progress" aria-hidden="true">
+        <span class="gauss-progress-label">Rechenweg</span>
+        <div class="gauss-progress-track">
+          <div class="gauss-progress-bar" id="progressBar"></div>
+        </div>
+        <span class="gauss-progress-count" id="progressCount"></span>
+      </div>
+
+      <div class="gauss-stage" id="gaussStage" aria-live="polite"></div>
+
+      <div class="control-row gauss-controls">
+        <button type="button" class="restart-button" id="restartButton">Neu starten</button>
+        <div class="control-side">
+          <button type="button" id="backButton">◀ Zurück</button>
+          <button type="button" id="nextButton">Weiter ▶</button>
+        </div>
+      </div>
+
+      <p class="gauss-tip">Auch mit den Pfeiltasten ← und → steuerbar.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Sebastian Schlütter · Hochschule Mainz
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
