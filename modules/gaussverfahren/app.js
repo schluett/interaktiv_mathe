@@ -1,418 +1,881 @@
 const stage = document.getElementById("gaussStage");
-const progressBar = document.getElementById("progressBar");
-const progressCount = document.getElementById("progressCount");
-const backButton = document.getElementById("backButton");
-const nextButton = document.getElementById("nextButton");
+const statusLine = document.getElementById("statusLine");
 const restartButton = document.getElementById("restartButton");
+const equationViewButton = document.getElementById("equationViewButton");
+const matrixViewButton = document.getElementById("matrixViewButton");
 
-const initialMatrix = [
-  [0, -1, 1, -1],
-  [1, -1, -1, -4],
-  [1, 1, 1, 6]
-];
+const ROWS = 3;
+const COLS = 4;
+const VARIABLE_NAMES = ["x₁", "x₂", "x₃"];
+const ROMAN = ["I", "II", "III"];
 
-const swappedMatrix = [
-  [1, -1, -1, -4],
-  [0, -1, 1, -1],
-  [1, 1, 1, 6]
-];
+// ---------------------------------------------------------------------------
+// Exakte rationale Zahlen
+// ---------------------------------------------------------------------------
 
-const firstElimination = [
-  [1, -1, -1, -4],
-  [0, -1, 1, -1],
-  [0, 2, 2, 10]
-];
+class Fraction {
+  constructor(numerator, denominator = 1n) {
+    let n = BigInt(numerator);
+    let d = BigInt(denominator);
+    if (d === 0n) throw new Error("Nenner darf nicht 0 sein.");
+    if (d < 0n) {
+      n = -n;
+      d = -d;
+    }
+    const g = gcdBigInt(absBigInt(n), d);
+    this.n = n / g;
+    this.d = d / g;
+    Object.freeze(this);
+  }
 
-const secondPivot = [
-  [1, -1, -1, -4],
-  [0, 1, -1, 1],
-  [0, 2, 2, 10]
-];
+  static zero() { return new Fraction(0n); }
+  static one() { return new Fraction(1n); }
 
-const secondElimination = [
-  [1, -1, -1, -4],
-  [0, 1, -1, 1],
-  [0, 0, 4, 8]
-];
+  static parse(raw) {
+    const text = String(raw).trim().replace(",", ".");
+    if (!text) throw new Error("Bitte alle Felder ausfüllen.");
 
-const thirdPivot = [
-  [1, -1, -1, -4],
-  [0, 1, -1, 1],
-  [0, 0, 1, 2]
-];
+    if (text.includes("/")) {
+      const parts = text.split("/");
+      if (parts.length !== 2) throw new Error(`Ungültige Zahl: ${raw}`);
+      const a = Fraction.parse(parts[0]);
+      const b = Fraction.parse(parts[1]);
+      if (b.isZero()) throw new Error("Nenner darf nicht 0 sein.");
+      return a.div(b);
+    }
 
-const x2Solved = [
-  [1, -1, -1, -4],
-  [0, 1, 0, 3],
-  [0, 0, 1, 2]
-];
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) {
+      throw new Error(`Ungültige Zahl: ${raw}`);
+    }
 
-const firstBackStep = [
-  [1, 0, -1, -1],
-  [0, 1, 0, 3],
-  [0, 0, 1, 2]
-];
+    const sign = text.startsWith("-") ? -1n : 1n;
+    const unsigned = text.replace(/^[+-]/, "");
+    if (!unsigned.includes(".")) return new Fraction(sign * BigInt(unsigned));
 
-const identityMatrix = [
-  [1, 0, 0, 1],
-  [0, 1, 0, 3],
-  [0, 0, 1, 2]
-];
+    const [integerPartRaw, decimalPartRaw] = unsigned.split(".");
+    const integerPart = integerPartRaw || "0";
+    const decimalPart = decimalPartRaw || "0";
+    const denominator = 10n ** BigInt(decimalPart.length);
+    const numerator = BigInt(integerPart) * denominator + BigInt(decimalPart);
+    return new Fraction(sign * numerator, denominator);
+  }
 
-function equationSystemHTML(options = {}) {
-  const highlightRows = options.highlightRows || [];
-  const highlightVariables = options.highlightVariables || false;
-
-  const variable = (name) => highlightVariables
-    ? `<span class="variable-highlight">${name}</span>`
-    : name;
-
-  const rowClass = (row) => highlightRows.includes(row) ? "equation-line is-highlighted" : "equation-line";
-
-  return `
-    <div class="system-card">
-      <div class="system-layout">
-        <div class="equation-system" aria-label="Lineares Gleichungssystem">
-          <div class="${rowClass(0)}"><span>−${variable("x<sub>2</sub>")} + ${variable("x<sub>3</sub>")}</span><span>= −1</span></div>
-          <div class="${rowClass(1)}"><span>${variable("x<sub>1</sub>")} − ${variable("x<sub>2</sub>")} − ${variable("x<sub>3</sub>")}</span><span>= −4</span></div>
-          <div class="${rowClass(2)}"><span>${variable("x<sub>1</sub>")} + ${variable("x<sub>2</sub>")} + ${variable("x<sub>3</sub>")}</span><span>= 6</span></div>
-        </div>
-        <div class="system-note">
-          <span>3 Gleichungen</span>
-          <span>3 Unbekannte</span>
-        </div>
-      </div>
-    </div>`;
+  add(other) { return new Fraction(this.n * other.d + other.n * this.d, this.d * other.d); }
+  sub(other) { return new Fraction(this.n * other.d - other.n * this.d, this.d * other.d); }
+  mul(other) { return new Fraction(this.n * other.n, this.d * other.d); }
+  div(other) {
+    if (other.isZero()) throw new Error("Division durch 0.");
+    return new Fraction(this.n * other.d, this.d * other.n);
+  }
+  neg() { return new Fraction(-this.n, this.d); }
+  abs() { return new Fraction(absBigInt(this.n), this.d); }
+  reciprocal() {
+    if (this.isZero()) throw new Error("0 besitzt keinen Kehrwert.");
+    return new Fraction(this.d * (this.n < 0n ? -1n : 1n), absBigInt(this.n));
+  }
+  eq(other) { return this.n === other.n && this.d === other.d; }
+  isZero() { return this.n === 0n; }
+  isOne() { return this.n === this.d; }
+  isMinusOne() { return this.n === -this.d; }
+  sign() { return this.n < 0n ? -1 : this.n > 0n ? 1 : 0; }
+  toString() {
+    const minus = this.n < 0n ? "−" : "";
+    const absN = absBigInt(this.n);
+    return this.d === 1n ? `${minus}${absN}` : `${minus}${absN}/${this.d}`;
+  }
 }
 
-function matrixHTML(matrix, options = {}) {
-  const {
-    showRhs = true,
-    showSeparator = true,
-    highlightColumn = null,
-    highlightRows = [],
-    highlightCells = [],
-    pivotCells = [],
-    warningCells = []
-  } = options;
+function absBigInt(x) { return x < 0n ? -x : x; }
 
-  const key = (r, c) => `${r}-${c}`;
-  const cells = [];
+function gcdBigInt(a, b) {
+  let x = a;
+  let y = b;
+  while (y !== 0n) {
+    const t = x % y;
+    x = y;
+    y = t;
+  }
+  return x === 0n ? 1n : x;
+}
 
-  matrix.forEach((row, r) => {
-    row.forEach((value, c) => {
-      const classes = ["matrix-cell"];
-      if (c === 3) {
-        classes.push("rhs");
-        if (!showSeparator) classes.push("no-separator");
+// ---------------------------------------------------------------------------
+// Zustand
+// ---------------------------------------------------------------------------
+
+const EXAMPLE_INPUT = [
+  ["0", "-1", "1", "-1"],
+  ["1", "-1", "-1", "-4"],
+  ["1", "1", "1", "6"]
+];
+
+let inputValues = EXAMPLE_INPUT.map(row => [...row]);
+let viewMode = "equation";
+let screen = "input";
+let matrix = null;
+let strategy = null;
+let currentPlan = null;
+let currentOptions = [];
+let feedbackOption = null;
+let resultState = null;
+let stepNumber = 0;
+let operationHistory = [];
+let inputError = "";
+
+function resetState() {
+  inputValues = EXAMPLE_INPUT.map(row => [...row]);
+  screen = "input";
+  matrix = null;
+  strategy = null;
+  currentPlan = null;
+  currentOptions = [];
+  feedbackOption = null;
+  resultState = null;
+  stepNumber = 0;
+  operationHistory = [];
+  inputError = "";
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// Matrixoperationen
+// ---------------------------------------------------------------------------
+
+function cloneMatrix(source) {
+  return source.map(row => row.slice());
+}
+
+function swapRows(target, r1, r2) {
+  const temp = target[r1];
+  target[r1] = target[r2];
+  target[r2] = temp;
+}
+
+function scaleRow(target, row, factor) {
+  target[row] = target[row].map(value => value.mul(factor));
+}
+
+function addRowMultiple(target, sourceRow, targetRow, factor) {
+  target[targetRow] = target[targetRow].map((value, c) =>
+    value.add(target[sourceRow][c].mul(factor))
+  );
+}
+
+function applyOperations(target, operations) {
+  operations.forEach(operation => {
+    if (operation.kind === "swap") {
+      swapRows(target, operation.r1, operation.r2);
+    } else if (operation.kind === "scale") {
+      scaleRow(target, operation.row, operation.factor);
+    } else if (operation.kind === "add") {
+      addRowMultiple(target, operation.source, operation.target, operation.factor);
+    }
+  });
+}
+
+function findContradictionRow(target) {
+  for (let r = 0; r < ROWS; r += 1) {
+    const allZero = target[r].slice(0, 3).every(value => value.isZero());
+    if (allZero && !target[r][3].isZero()) return r;
+  }
+  return -1;
+}
+
+function coefficientRank(target) {
+  return target.filter(row => row.slice(0, 3).some(value => !value.isZero())).length;
+}
+
+// ---------------------------------------------------------------------------
+// Gauß-Strategie: jeweils didaktisch günstigster nächster Schritt
+// ---------------------------------------------------------------------------
+
+function createStrategy() {
+  return {
+    phase: "forward",
+    pivotRow: 0,
+    pivotCol: 0,
+    backRow: 2
+  };
+}
+
+function choosePivotRow(target, row, col) {
+  const current = target[row][col];
+
+  // Eine vorhandene ±1 bleibt stehen: kein unnötiger Zeilentausch.
+  if (current.isOne() || current.isMinusOne()) return row;
+
+  // Sonst bevorzugen wir eine +1, danach eine -1 in einer tieferen Zeile.
+  for (let r = row + 1; r < ROWS; r += 1) {
+    if (target[r][col].isOne()) return r;
+  }
+  for (let r = row + 1; r < ROWS; r += 1) {
+    if (target[r][col].isMinusOne()) return r;
+  }
+
+  // Ist der aktuelle Eintrag bereits ungleich 0, vermeiden wir einen unnötigen Tausch.
+  if (!current.isZero()) return row;
+
+  // Andernfalls nehmen wir die betragsmäßig einfachste verfügbare Zeile.
+  const candidates = [];
+  for (let r = row + 1; r < ROWS; r += 1) {
+    if (!target[r][col].isZero()) candidates.push(r);
+  }
+  if (!candidates.length) return -1;
+
+  candidates.sort((a, b) => compareFractionAbs(target[a][col], target[b][col]));
+  return candidates[0];
+}
+
+function compareFractionAbs(a, b) {
+  const left = absBigInt(a.n) * b.d;
+  const right = absBigInt(b.n) * a.d;
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function nextPlan() {
+  const contradiction = findContradictionRow(matrix);
+  if (contradiction >= 0) {
+    finishWith({ type: "none", contradictionRow: contradiction });
+    return null;
+  }
+
+  if (strategy.phase === "forward") {
+    while (strategy.pivotRow < ROWS && strategy.pivotCol < 3) {
+      const r = strategy.pivotRow;
+      const c = strategy.pivotCol;
+
+      const anyNonZero = Array.from({ length: ROWS - r }, (_, i) => r + i)
+        .some(row => !matrix[row][c].isZero());
+
+      if (!anyNonZero) {
+        strategy.pivotCol += 1;
+        continue;
       }
-      if (!showRhs && c === 3) classes.push("is-hidden");
-      if (highlightColumn === c || highlightRows.includes(r) || highlightCells.includes(key(r, c))) {
-        classes.push("is-highlighted");
-      }
-      if (pivotCells.includes(key(r, c))) classes.push("is-pivot");
-      if (warningCells.includes(key(r, c))) classes.push("is-warning");
 
-      cells.push(`<span class="${classes.join(" ")}">${formatNumber(value)}</span>`);
-    });
+      const candidate = choosePivotRow(matrix, r, c);
+      if (candidate !== r) return makeSwapPlan(r, c, candidate);
+
+      const pivot = matrix[r][c];
+      if (!pivot.isOne()) return makeScalePlan(r, c, pivot);
+
+      const targets = [];
+      for (let row = r + 1; row < ROWS; row += 1) {
+        if (!matrix[row][c].isZero()) targets.push(row);
+      }
+      if (targets.length) return makeEliminationPlan(r, c, targets, "below");
+
+      strategy.pivotRow += 1;
+      strategy.pivotCol += 1;
+    }
+
+    const contradictionAfterForward = findContradictionRow(matrix);
+    if (contradictionAfterForward >= 0) {
+      finishWith({ type: "none", contradictionRow: contradictionAfterForward });
+      return null;
+    }
+
+    if (coefficientRank(matrix) < 3) {
+      finishWith({ type: "infinite" });
+      return null;
+    }
+
+    strategy.phase = "backward";
+    strategy.backRow = 2;
+  }
+
+  while (strategy.phase === "backward" && strategy.backRow >= 0) {
+    const r = strategy.backRow;
+    const c = r;
+    const targets = [];
+    for (let row = 0; row < r; row += 1) {
+      if (!matrix[row][c].isZero()) targets.push(row);
+    }
+
+    if (targets.length) return makeEliminationPlan(r, c, targets, "above");
+    strategy.backRow -= 1;
+  }
+
+  finishWith({ type: "unique" });
+  return null;
+}
+
+function makeSwapPlan(pivotRow, pivotCol, candidateRow) {
+  const value = matrix[candidateRow][pivotCol];
+  const operations = [{ kind: "swap", r1: pivotRow, r2: candidateRow }];
+  const correctLabel = `${ROMAN[pivotRow]} ↔ ${ROMAN[candidateRow]}`;
+
+  return {
+    type: "swap",
+    phase: "Vorwärtselimination",
+    goal: `Pivot in Spalte ${pivotCol + 1} festlegen`,
+    prompt: "Welche Zeilenoperation ist hier am günstigsten?",
+    correctLabel,
+    operations,
+    pivotCell: cellKey(pivotRow, pivotCol),
+    targetCells: [cellKey(candidateRow, pivotCol)],
+    explanation: `An der nächsten Pivotposition benötigen wir einen möglichst einfachen Eintrag ungleich 0. Durch ${correctLabel} gelangt ${value.toString()} an diese Position.`,
+    wrongExplanation: `Entscheidend ist jetzt die Pivotposition in Zeile ${pivotRow + 1}, Spalte ${pivotCol + 1}. Der beste Schritt bringt dort einen einfachen Eintrag ungleich 0 hin; ${correctLabel} erledigt das unmittelbar.`,
+    distractors: makeSwapDistractors(pivotRow, pivotCol, candidateRow)
+  };
+}
+
+function makeSwapDistractors(pivotRow, pivotCol, candidateRow) {
+  const alternatives = [];
+
+  alternatives.push({
+    label: `${ROMAN[pivotRow]} ← 2 · ${ROMAN[pivotRow]}`,
+    operations: [{ kind: "scale", row: pivotRow, factor: new Fraction(2n) }]
   });
 
-  return `<div class="aug-matrix" role="img" aria-label="Erweiterte Matrix">${cells.join("")}</div>`;
+  const untouchedRows = [0, 1, 2].filter(r => r !== pivotRow);
+  alternatives.push({
+    label: `${ROMAN[untouchedRows[0]]} ↔ ${ROMAN[untouchedRows[1]]}`,
+    operations: [{ kind: "swap", r1: untouchedRows[0], r2: untouchedRows[1] }]
+  });
+
+  return alternatives.slice(0, 2);
 }
 
-function formatNumber(value) {
-  if (Object.is(value, -0)) return "0";
-  return String(value).replace("-", "−");
+function makeScalePlan(pivotRow, pivotCol, pivot) {
+  const factor = pivot.reciprocal();
+  const correctLabel = `${ROMAN[pivotRow]} ← ${factor.toString()} · ${ROMAN[pivotRow]}`;
+  const distractorFactor = new Fraction(2n);
+  const untouchedRows = [0, 1, 2].filter(r => r !== pivotRow);
+
+  return {
+    type: "scale",
+    phase: "Vorwärtselimination",
+    goal: `Pivot in Spalte ${pivotCol + 1} auf 1 normieren`,
+    prompt: "Welcher Schritt erzeugt an der Pivotposition eine 1?",
+    correctLabel,
+    operations: [{ kind: "scale", row: pivotRow, factor }],
+    pivotCell: cellKey(pivotRow, pivotCol),
+    targetCells: [cellKey(pivotRow, pivotCol)],
+    explanation: `Der aktuelle Pivot ist ${pivot.toString()}. Die Multiplikation mit dem Kehrwert ${factor.toString()} macht daraus genau 1.`,
+    wrongExplanation: `Für die weitere Elimination ist ein Pivot 1 besonders übersichtlich. Aus ${pivot.toString()} wird genau dann 1, wenn die gesamte Zeile mit ${factor.toString()} multipliziert wird.`,
+    distractors: [
+      {
+        label: `${ROMAN[pivotRow]} ← ${distractorFactor.toString()} · ${ROMAN[pivotRow]}`,
+        operations: [{ kind: "scale", row: pivotRow, factor: distractorFactor }]
+      },
+      {
+        label: `${ROMAN[untouchedRows[0]]} ↔ ${ROMAN[untouchedRows[1]]}`,
+        operations: [{ kind: "swap", r1: untouchedRows[0], r2: untouchedRows[1] }]
+      }
+    ]
+  };
 }
 
-function matrixCard(matrix, options = {}) {
-  const operation = options.operation
-    ? `<span class="operation-chip${options.operationSoft ? " is-soft" : ""}">${options.operation}</span>`
-    : "";
+function makeEliminationPlan(pivotRow, pivotCol, targetRows, direction) {
+  const operations = targetRows.map(targetRow => ({
+    kind: "add",
+    source: pivotRow,
+    target: targetRow,
+    factor: matrix[targetRow][pivotCol].neg()
+  }));
 
-  const caption = options.caption || "Gaußschema";
-  const undertext = options.undertext ? `<p class="matrix-undertext">${options.undertext}</p>` : "";
-  const goal = options.goal ? `<div class="goal-row">${options.goal}</div>` : "";
+  const correctLabel = formatCombinedOperations(operations);
+  const wrongSignOps = targetRows.map(targetRow => ({
+    kind: "add",
+    source: pivotRow,
+    target: targetRow,
+    factor: matrix[targetRow][pivotCol]
+  }));
 
-  return `
-    <div class="matrix-card">
-      <div class="matrix-caption"><span>${caption}</span>${operation}</div>
-      ${matrixHTML(matrix, options)}
-      ${goal}
-      ${undertext}
-    </div>`;
+  const used = new Set([
+    operationSignature(operations),
+    operationSignature(wrongSignOps)
+  ]);
+  let offset = 1n;
+  let offsetOps;
+  do {
+    offsetOps = targetRows.map(targetRow => ({
+      kind: "add",
+      source: pivotRow,
+      target: targetRow,
+      factor: matrix[targetRow][pivotCol].neg().add(new Fraction(offset))
+    }));
+    offset += 1n;
+  } while (used.has(operationSignature(offsetOps)));
+
+  const targetValues = targetRows.map(r => matrix[r][pivotCol].toString()).join(", ");
+  const where = direction === "below" ? "unterhalb" : "oberhalb";
+  const phase = direction === "below" ? "Vorwärtselimination" : "Rückwärtselimination";
+
+  return {
+    type: direction === "below" ? "eliminate-below" : "eliminate-above",
+    phase,
+    goal: `Einträge ${where} des Pivots in Spalte ${pivotCol + 1} zu 0 machen`,
+    prompt: "Welche Operation beseitigt die markierten Einträge in einem Schritt?",
+    correctLabel,
+    operations,
+    pivotCell: cellKey(pivotRow, pivotCol),
+    targetCells: targetRows.map(r => cellKey(r, pivotCol)),
+    explanation: `Der Pivot ist bereits 1. Die markierten Einträge (${targetValues}) verschwinden, wenn jeweils das passende Vielfache der Pivotzeile addiert wird.`,
+    wrongExplanation: `Der Pivot ist 1. Das aktuelle Ziel ist deshalb, die markierten Einträge ${where} dieses Pivots exakt zu 0 zu machen. ${correctLabel} wählt dafür jeweils den Gegenwert des betreffenden Eintrags.`,
+    distractors: [
+      { label: formatCombinedOperations(wrongSignOps), operations: wrongSignOps },
+      { label: formatCombinedOperations(offsetOps), operations: offsetOps }
+    ]
+  };
 }
 
-function rulesHTML() {
-  return `
-    <div class="rules-card">
-      <div class="row-rule">
-        <span class="row-rule-symbol">↕</span>
-        <span><strong>Zeilen vertauschen</strong>Zwei Gleichungen dürfen ihre Position tauschen.</span>
-      </div>
-      <div class="row-rule">
-        <span class="row-rule-symbol">·c</span>
-        <span><strong>Eine Zeile skalieren</strong>Eine Zeile darf mit einer Zahl ungleich 0 multipliziert werden.</span>
-      </div>
-      <div class="row-rule">
-        <span class="row-rule-symbol">+</span>
-        <span><strong>Ein Vielfaches addieren</strong>Ein Vielfaches einer Zeile darf zu einer anderen Zeile addiert werden.</span>
-      </div>
-    </div>`;
+function operationSignature(operations) {
+  return operations.map(operation => {
+    if (operation.kind === "add") {
+      return `a:${operation.source}:${operation.target}:${operation.factor.n}/${operation.factor.d}`;
+    }
+    if (operation.kind === "scale") {
+      return `s:${operation.row}:${operation.factor.n}/${operation.factor.d}`;
+    }
+    return `w:${operation.r1}:${operation.r2}`;
+  }).join("|");
 }
 
-function solutionHTML() {
-  return `
-    <div class="solution-card">
-      ${matrixHTML(identityMatrix, {
-        pivotCells: ["0-0", "1-1", "2-2"],
-        highlightCells: ["0-3", "1-3", "2-3"]
-      })}
-      <div class="solution-values" aria-label="Lösung">
-        <span class="solution-value">x<sub>1</sub> = 1</span>
-        <span class="solution-value">x<sub>2</sub> = 3</span>
-        <span class="solution-value">x<sub>3</sub> = 2</span>
-      </div>
-    </div>`;
+function formatCombinedOperations(operations) {
+  return operations.map(operation => {
+    if (operation.kind !== "add") return "";
+    const factor = operation.factor;
+    const source = ROMAN[operation.source];
+    const target = ROMAN[operation.target];
+
+    let sourceTerm;
+    if (factor.isOne()) sourceTerm = source;
+    else if (factor.isMinusOne()) sourceTerm = `−${source}`;
+    else sourceTerm = `${factor.toString()} · ${source}`;
+
+    return `${sourceTerm} + ${target}`;
+  }).join("; ");
 }
 
-function checkHTML() {
-  return `
-    <div class="check-card">
-      <div class="check-line"><span>−3 + 2 = −1</span><span class="check-mark">✓</span></div>
-      <div class="check-line"><span>1 − 3 − 2 = −4</span><span class="check-mark">✓</span></div>
-      <div class="check-line"><span>1 + 3 + 2 = 6</span><span class="check-mark">✓</span></div>
-    </div>`;
+function cellKey(row, col) {
+  return `${row}-${col}`;
 }
 
-const steps = [
-  {
-    kicker: "Ausgangssituation",
-    title: "Drei Gleichungen, drei Unbekannte",
-    text: "Aufgabe ist es, dieses lineare Gleichungssystem zu lösen. Gegeben sind drei Gleichungen und die drei Unbekannten x₁, x₂ und x₃.",
-    visual: () => equationSystemHTML({ highlightRows: [0, 1, 2], highlightVariables: true })
-  },
-  {
-    kicker: "Was heißt lösen?",
-    title: "Gesucht sind Werte, die alle Gleichungen erfüllen",
-    text: "Wir suchen genau eine Belegung der Unbekannten, für die alle drei Gleichungen gleichzeitig richtig sind.",
-    visual: () => equationSystemHTML()
-  },
-  {
-    kicker: "Kürzere Notation",
-    title: "Zuerst schreiben wir nur die Koeffizienten auf",
-    text: "Die Vorfaktoren von x₁, x₂ und x₃ bilden die ersten drei Spalten. Fehlt eine Unbekannte in einer Gleichung, steht an dieser Stelle eine 0.",
-    visual: () => matrixCard(initialMatrix, {
-      showRhs: false,
-      showSeparator: false,
-      caption: "Koeffizientenmatrix",
-      undertext: "Die erste Gleichung enthält kein x₁. Deshalb beginnt ihre Zeile mit 0."
-    })
-  },
-  {
-    kicker: "Kürzere Notation",
-    title: "Dann setzen wir eine senkrechte Trennlinie",
-    text: "Die Linie markiert die Grenze zwischen den Koeffizienten auf der linken Seite und den später folgenden rechten Seiten der Gleichungen.",
-    visual: () => matrixCard(initialMatrix, {
-      showRhs: false,
-      showSeparator: true,
-      caption: "Gaußschema mit Trennlinie",
-      undertext: "Links bleibt die Koeffizientenmatrix unverändert."
-    })
-  },
-  {
-    kicker: "Erweiterte Matrix",
-    title: "Rechts ergänzen wir die Ergebnisse der Gleichungen",
-    text: "Nun tragen wir hinter der Trennlinie −1, −4 und 6 ein. Das vollständige Gaußschema enthält damit dieselbe Information wie das ursprüngliche Gleichungssystem.",
-    visual: () => matrixCard(initialMatrix, {
-      caption: "Erweitertes Gaußschema",
-      highlightColumn: 3,
-      undertext: "Links stehen die Koeffizienten, rechts die Konstanten."
-    })
-  },
-  {
-    kicker: "Eliminationsidee",
-    title: "Wir beginnen in der ersten Spalte",
-    text: "Für die erste Pivotposition oben links benötigen wir einen Eintrag ungleich 0. Besonders übersichtlich ist eine 1. Danach erzeugen wir unter diesem Pivot Nullen.",
-    visual: () => matrixCard(initialMatrix, {
-      caption: "Erster Eliminationsschritt",
-      highlightColumn: 0,
-      warningCells: ["0-0"],
-      goal: '<span class="goal-chip">Ziel in Spalte 1: 1, 0, 0</span>'
-    })
-  },
-  {
-    kicker: "Äquivalente Umformungen",
-    title: "Diese Zeilenoperationen sind erlaubt",
-    text: "Mit diesen Operationen verändern wir die Schreibweise, aber nicht die Lösungsmenge des Gleichungssystems.",
-    visual: () => rulesHTML()
-  },
-  {
-    kicker: "Pivotwahl",
-    title: "Oben links steht zunächst eine 0",
-    text: "Mit 0 als Pivot lässt sich nicht eliminieren. Hier ist es deshalb am einfachsten, die erste und die zweite Zeile zu vertauschen. Andere geeignete Zeilenumformungen wären ebenfalls möglich.",
-    visual: () => matrixCard(initialMatrix, {
-      caption: "Ausgangsschema",
-      warningCells: ["0-0"],
-      operation: "Z₁ ↔ Z₂",
-      operationSoft: true
-    })
-  },
-  {
-    kicker: "1. Zeilenoperation",
-    title: "Wir vertauschen die erste und die zweite Zeile",
-    text: "Jetzt steht an der ersten Pivotposition eine 1. Die zweite Zeile beginnt bereits mit 0; nur in der dritten Zeile muss der erste Eintrag noch eliminiert werden.",
-    visual: () => matrixCard(swappedMatrix, {
-      caption: "Nach Z₁ ↔ Z₂",
-      operation: "Z₁ ↔ Z₂",
-      pivotCells: ["0-0"],
-      highlightRows: [0, 1]
-    })
-  },
-  {
-    kicker: "Elimination unter Pivot 1",
-    title: "Die 1 in der dritten Zeile wird zu 0",
-    text: "Wir ziehen die erste Zeile von der dritten Zeile ab. Dadurch verschwindet x₁ aus der dritten Gleichung.",
-    visual: () => matrixCard(firstElimination, {
-      caption: "Erste Spalte bereinigt",
-      operation: "Z₃ ← Z₃ − Z₁",
-      pivotCells: ["0-0"],
-      highlightRows: [2]
-    })
-  },
-  {
-    kicker: "Pivot 2",
-    title: "Den zweiten Pivot machen wir zu 1",
-    text: "In der zweiten Zeile steht −1. Wir multiplizieren die gesamte zweite Zeile mit −1.",
-    visual: () => matrixCard(secondPivot, {
-      caption: "Zweiter Pivot normiert",
-      operation: "Z₂ ← −Z₂",
-      pivotCells: ["0-0", "1-1"],
-      highlightRows: [1]
-    })
-  },
-  {
-    kicker: "Elimination unter Pivot 2",
-    title: "Auch unter dem zweiten Pivot entsteht eine 0",
-    text: "Von der dritten Zeile ziehen wir das Zweifache der zweiten Zeile ab. Damit enthält die dritte Zeile nur noch x₃.",
-    visual: () => matrixCard(secondElimination, {
-      caption: "Stufenform",
-      operation: "Z₃ ← Z₃ − 2Z₂",
-      pivotCells: ["0-0", "1-1"],
-      highlightRows: [2]
-    })
-  },
-  {
-    kicker: "Pivot 3",
-    title: "Die letzte Zeile liefert direkt x₃",
-    text: "Wir teilen die dritte Zeile durch 4. Dann steht dort x₃ = 2.",
-    visual: () => matrixCard(thirdPivot, {
-      caption: "Dritter Pivot normiert",
-      operation: "Z₃ ← ¼ Z₃",
-      pivotCells: ["0-0", "1-1", "2-2"],
-      highlightRows: [2]
-    })
-  },
-  {
-    kicker: "Rückwärtsschritt",
-    title: "Mit x₃ eliminieren wir den Eintrag darüber",
-    text: "Wir addieren die dritte Zeile zur zweiten Zeile. Aus x₂ − x₃ = 1 wird x₂ = 3.",
-    visual: () => matrixCard(x2Solved, {
-      caption: "x₂ bestimmt",
-      operation: "Z₂ ← Z₂ + Z₃",
-      pivotCells: ["0-0", "1-1", "2-2"],
-      highlightRows: [1]
-    })
-  },
-  {
-    kicker: "Rückwärtsschritt",
-    title: "Nun eliminieren wir x₂ aus der ersten Zeile",
-    text: "Wir addieren die zweite Zeile zur ersten Zeile. In der ersten Zeile bleibt zunächst x₁ − x₃ = −1.",
-    visual: () => matrixCard(firstBackStep, {
-      caption: "x₂ aus Zeile 1 eliminiert",
-      operation: "Z₁ ← Z₁ + Z₂",
-      pivotCells: ["0-0", "1-1", "2-2"],
-      highlightRows: [0]
-    })
-  },
-  {
-    kicker: "Letzter Eliminationsschritt",
-    title: "Zum Schluss eliminieren wir x₃ aus der ersten Zeile",
-    text: "Wir addieren die dritte Zeile zur ersten Zeile. Links steht jetzt die Einheitsmatrix; rechts können wir die Lösung direkt ablesen.",
-    visual: () => matrixCard(identityMatrix, {
-      caption: "Reduzierte Zeilenstufenform",
-      operation: "Z₁ ← Z₁ + Z₃",
-      pivotCells: ["0-0", "1-1", "2-2"],
-      highlightRows: [0]
-    })
-  },
-  {
-    kicker: "Lösung",
-    title: "Die Lösung lässt sich direkt ablesen",
-    text: "Die drei Zeilen bedeuten x₁ = 1, x₂ = 3 und x₃ = 2.",
-    visual: () => solutionHTML()
-  },
-  {
-    kicker: "Probe",
-    title: "Alle drei Ausgangsgleichungen sind erfüllt",
-    text: "Setzen wir die gefundenen Werte in das ursprüngliche Gleichungssystem ein, stimmen alle rechten Seiten. Damit ist die Lösung bestätigt.",
-    visual: () => checkHTML()
+function finishWith(result) {
+  screen = "result";
+  resultState = result;
+  currentPlan = null;
+  currentOptions = [];
+}
+
+// ---------------------------------------------------------------------------
+// Quizoptionen
+// ---------------------------------------------------------------------------
+
+function buildOptions(plan) {
+  const options = [
+    {
+      label: plan.correctLabel,
+      isCorrect: true,
+      operations: plan.operations,
+      feedback: plan.explanation
+    },
+    ...plan.distractors.map(item => ({
+      label: item.label,
+      isCorrect: false,
+      operations: item.operations,
+      feedback: plan.wrongExplanation
+    }))
+  ];
+
+  // Reproduzierbare Rotation: die richtige Antwort steht nicht immer an derselben Stelle.
+  const shift = stepNumber % options.length;
+  return options.slice(shift).concat(options.slice(0, shift));
+}
+
+function selectOption(index) {
+  if (screen !== "quiz") return;
+  const option = currentOptions[index];
+  if (!option) return;
+
+  if (!option.isCorrect) {
+    feedbackOption = option;
+    screen = "feedback";
+    render();
+    return;
   }
-];
 
-let currentStep = 0;
+  applyOperations(matrix, option.operations);
+  operationHistory.push(currentPlan.correctLabel);
+  stepNumber += 1;
+  currentPlan = nextPlan();
 
-function renderStep() {
-  const step = steps[currentStep];
-  const percent = steps.length === 1 ? 100 : (currentStep / (steps.length - 1)) * 100;
-
-  stage.classList.remove("is-changing");
-  void stage.offsetWidth;
-
-  stage.innerHTML = `
-    <div class="gauss-stage-inner">
-      <div class="gauss-stage-head">
-        <span class="gauss-kicker">${step.kicker}</span>
-        <h2>${step.title}</h2>
-        <p class="gauss-explanation">${step.text}</p>
-      </div>
-      <div class="gauss-visual">${step.visual()}</div>
-    </div>`;
-
-  stage.classList.add("is-changing");
-  progressBar.style.width = `${percent}%`;
-  progressCount.textContent = `${currentStep + 1} / ${steps.length}`;
-  backButton.disabled = currentStep === 0;
-  nextButton.disabled = currentStep === steps.length - 1;
-  nextButton.textContent = currentStep === steps.length - 2 ? "Zur Lösung ▶" : "Weiter ▶";
+  if (screen !== "result") {
+    currentOptions = buildOptions(currentPlan);
+    screen = "quiz";
+  }
+  render();
 }
 
-function moveBack() {
-  if (currentStep > 0) {
-    currentStep -= 1;
-    renderStep();
+function closeFeedback() {
+  feedbackOption = null;
+  screen = "quiz";
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// Eingabe
+// ---------------------------------------------------------------------------
+
+function confirmInput() {
+  try {
+    const parsed = inputValues.map(row => row.map(value => Fraction.parse(value)));
+    matrix = parsed;
+    strategy = createStrategy();
+    stepNumber = 0;
+    operationHistory = [];
+    inputError = "";
+    resultState = null;
+    currentPlan = nextPlan();
+
+    if (screen !== "result") {
+      screen = "quiz";
+      currentOptions = buildOptions(currentPlan);
+    }
+    render();
+  } catch (error) {
+    inputError = error.message || "Die Eingabe konnte nicht gelesen werden.";
+    render();
   }
 }
 
-function moveForward() {
-  if (currentStep < steps.length - 1) {
-    currentStep += 1;
-    renderStep();
+function updateInputValue(event) {
+  const input = event.target.closest("input[data-row][data-col]");
+  if (!input) return;
+  const r = Number(input.dataset.row);
+  const c = Number(input.dataset.col);
+  inputValues[r][c] = input.value;
+}
+
+// ---------------------------------------------------------------------------
+// Darstellung
+// ---------------------------------------------------------------------------
+
+function render() {
+  equationViewButton.classList.toggle("is-selected", viewMode === "equation");
+  matrixViewButton.classList.toggle("is-selected", viewMode === "matrix");
+
+  if (screen === "input") {
+    statusLine.textContent = "Eingabe";
+    stage.innerHTML = renderInputScreen();
+    bindStageEvents();
+    return;
   }
+
+  if (screen === "quiz") {
+    statusLine.textContent = `Schritt ${stepNumber + 1} · ${currentPlan.phase}`;
+    stage.innerHTML = renderQuizScreen();
+    bindStageEvents();
+    return;
+  }
+
+  if (screen === "feedback") {
+    statusLine.textContent = `Schritt ${stepNumber + 1} · Hinweis`;
+    stage.innerHTML = renderFeedbackScreen();
+    bindStageEvents();
+    return;
+  }
+
+  statusLine.textContent = "Ergebnis";
+  stage.innerHTML = renderResultScreen();
+  bindStageEvents();
 }
 
-function restart() {
-  currentStep = 0;
-  renderStep();
+function renderInputScreen() {
+  const content = viewMode === "matrix"
+    ? renderMatrixInput()
+    : renderEquationInput();
+
+  return `
+    <div class="gauss-screen">
+      <div class="gauss-screen-head">
+        <h2>Lineares Gleichungssystem eingeben</h2>
+        <p>Tragen Sie die Koeffizienten der drei Gleichungen und die rechte Seite ein. Ganze Zahlen, Dezimalzahlen und Brüche wie <code>1/2</code> sind möglich.</p>
+      </div>
+      <div class="gauss-display-card input-card">
+        ${content}
+      </div>
+      ${inputError ? `<div class="gauss-message is-error">${escapeHTML(inputError)}</div>` : ""}
+      <div class="gauss-action-row">
+        <button type="button" class="gauss-primary-action" id="confirmInputButton">Weiter</button>
+      </div>
+    </div>`;
 }
 
-backButton.addEventListener("click", moveBack);
-nextButton.addEventListener("click", moveForward);
-restartButton.addEventListener("click", restart);
+function renderMatrixInput() {
+  const cells = [];
+  for (let r = 0; r < ROWS; r += 1) {
+    for (let c = 0; c < COLS; c += 1) {
+      cells.push(`
+        <label class="gauss-input-cell${c === 3 ? " rhs" : ""}">
+          <span class="sr-only">Zeile ${r + 1}, ${c === 3 ? "rechte Seite" : `Koeffizient von ${VARIABLE_NAMES[c]}`}</span>
+          <input data-row="${r}" data-col="${c}" inputmode="decimal" value="${escapeHTML(inputValues[r][c])}">
+        </label>`);
+    }
+  }
+  return `<div class="gauss-input-matrix">${cells.join("")}</div>`;
+}
 
-document.addEventListener("keydown", (event) => {
-  if (event.key === "ArrowLeft") moveBack();
-  if (event.key === "ArrowRight") moveForward();
+function renderEquationInput() {
+  return `
+    <div class="gauss-input-equations">
+      ${Array.from({ length: ROWS }, (_, r) => `
+        <div class="gauss-input-equation">
+          ${Array.from({ length: 3 }, (_, c) => `
+            <label>
+              <span class="sr-only">Zeile ${r + 1}, Koeffizient von ${VARIABLE_NAMES[c]}</span>
+              <input data-row="${r}" data-col="${c}" inputmode="decimal" value="${escapeHTML(inputValues[r][c])}">
+              <span>· ${VARIABLE_NAMES[c]}</span>
+            </label>
+            ${c < 2 ? '<span class="input-plus">+</span>' : ""}
+          `).join("")}
+          <span class="input-equals">=</span>
+          <label>
+            <span class="sr-only">Zeile ${r + 1}, rechte Seite</span>
+            <input data-row="${r}" data-col="3" inputmode="decimal" value="${escapeHTML(inputValues[r][3])}">
+          </label>
+        </div>
+      `).join("")}
+    </div>`;
+}
+
+function renderQuizScreen() {
+  const highlights = {
+    pivotCells: [currentPlan.pivotCell],
+    targetCells: []
+  };
+
+  return `
+    <div class="gauss-screen">
+      <div class="gauss-screen-head">
+        <span class="gauss-goal-label">Aktuelles Ziel</span>
+        <h2>${escapeHTML(currentPlan.goal)}</h2>
+        <p>${escapeHTML(currentPlan.prompt)}</p>
+      </div>
+
+      <div class="gauss-display-card">
+        ${renderCurrentSystem(highlights)}
+      </div>
+
+      <div class="gauss-options" role="group" aria-label="Mögliche nächste Schritte">
+        ${currentOptions.map((option, index) => `
+          <button type="button" class="gauss-option" data-option-index="${index}">
+            ${escapeHTML(option.label)}
+          </button>
+        `).join("")}
+      </div>
+    </div>`;
+}
+
+function renderFeedbackScreen() {
+  const highlights = {
+    pivotCells: [currentPlan.pivotCell],
+    targetCells: currentPlan.targetCells
+  };
+
+  return `
+    <div class="gauss-screen">
+      <div class="gauss-screen-head">
+        <span class="gauss-goal-label is-hint">Hinweis</span>
+        <h2>Der gewählte Schritt ist hier nicht der günstigste.</h2>
+      </div>
+
+      <div class="gauss-display-card">
+        ${renderCurrentSystem(highlights)}
+      </div>
+
+      <div class="gauss-feedback-box">
+        <p>${escapeHTML(feedbackOption.feedback)}</p>
+        <p class="gauss-best-step"><strong>Günstiger nächster Schritt:</strong> ${escapeHTML(currentPlan.correctLabel)}</p>
+      </div>
+
+      <div class="gauss-action-row">
+        <button type="button" class="gauss-primary-action" id="feedbackContinueButton">Weiter</button>
+      </div>
+    </div>`;
+}
+
+function renderResultScreen() {
+  if (resultState.type === "unique") {
+    const solutions = matrix.map(row => row[3]);
+    return `
+      <div class="gauss-screen">
+        <div class="gauss-screen-head">
+          <span class="gauss-goal-label is-success">Eindeutige Lösung</span>
+          <h2>Die linke Seite ist die Einheitsmatrix.</h2>
+          <p>Damit kann die Lösung direkt aus der rechten Spalte abgelesen werden.</p>
+        </div>
+        <div class="gauss-display-card">
+          ${renderCurrentSystem({
+            pivotCells: [cellKey(0, 0), cellKey(1, 1), cellKey(2, 2)],
+            targetCells: [cellKey(0, 3), cellKey(1, 3), cellKey(2, 3)]
+          })}
+        </div>
+        <div class="gauss-result-values">
+          ${solutions.map((value, i) => `<span>${VARIABLE_NAMES[i]} = ${value.toString()}</span>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  if (resultState.type === "none") {
+    const row = resultState.contradictionRow;
+    return `
+      <div class="gauss-screen">
+        <div class="gauss-screen-head">
+          <span class="gauss-goal-label is-error-label">Keine Lösung</span>
+          <h2>Es ist ein Widerspruch entstanden.</h2>
+          <p>Die markierte Zeile hat links nur Nullen, rechts aber einen Wert ungleich 0. Sie entspricht also einer unmöglichen Gleichung.</p>
+        </div>
+        <div class="gauss-display-card">
+          ${renderCurrentSystem({ warningRows: [row] })}
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="gauss-screen">
+      <div class="gauss-screen-head">
+        <span class="gauss-goal-label is-hint">Unendlich viele Lösungen</span>
+        <h2>Es gibt weniger Pivotpositionen als Unbekannte.</h2>
+        <p>Mindestens eine Variable bleibt frei. Da kein Widerspruch vorliegt, besitzt das Gleichungssystem unendlich viele Lösungen.</p>
+      </div>
+      <div class="gauss-display-card">
+        ${renderCurrentSystem({})}
+      </div>
+    </div>`;
+}
+
+function renderCurrentSystem(highlights) {
+  return viewMode === "matrix"
+    ? renderMatrix(matrix, highlights)
+    : renderEquationSystem(matrix, highlights);
+}
+
+function renderMatrix(target, highlights = {}) {
+  const pivotCells = new Set(highlights.pivotCells || []);
+  const targetCells = new Set(highlights.targetCells || []);
+  const warningRows = new Set(highlights.warningRows || []);
+
+  const cells = [];
+  for (let r = 0; r < ROWS; r += 1) {
+    for (let c = 0; c < COLS; c += 1) {
+      const key = cellKey(r, c);
+      const classes = ["gauss-value-cell"];
+      if (c === 3) classes.push("rhs");
+      if (pivotCells.has(key)) classes.push("is-pivot");
+      if (targetCells.has(key)) classes.push("is-target");
+      if (warningRows.has(r)) classes.push("is-warning");
+      cells.push(`<span class="${classes.join(" ")}">${target[r][c].toString()}</span>`);
+    }
+  }
+
+  return `<div class="gauss-matrix" aria-label="Erweiterte Matrix">${cells.join("")}</div>`;
+}
+
+function renderEquationSystem(target, highlights = {}) {
+  const pivotCells = new Set(highlights.pivotCells || []);
+  const targetCells = new Set(highlights.targetCells || []);
+  const warningRows = new Set(highlights.warningRows || []);
+
+  return `
+    <div class="gauss-equation-system">
+      ${target.map((row, r) => `
+        <div class="gauss-equation-row${warningRows.has(r) ? " is-warning" : ""}">
+          <div class="gauss-equation-left">
+            ${renderEquationLeft(row, r, pivotCells, targetCells)}
+          </div>
+          <span class="gauss-equals">=</span>
+          <span class="gauss-rhs-value${targetCells.has(cellKey(r, 3)) ? " is-target" : ""}${pivotCells.has(cellKey(r, 3)) ? " is-pivot" : ""}">${row[3].toString()}</span>
+        </div>
+      `).join("")}
+    </div>`;
+}
+
+function renderEquationLeft(row, r, pivotCells, targetCells) {
+  const pieces = [];
+  let hasVisibleTerm = false;
+
+  for (let c = 0; c < 3; c += 1) {
+    const value = row[c];
+    const key = cellKey(r, c);
+    const highlighted = pivotCells.has(key) || targetCells.has(key);
+
+    if (value.isZero() && !highlighted) continue;
+
+    const classes = ["gauss-equation-term"];
+    if (pivotCells.has(key)) classes.push("is-pivot");
+    if (targetCells.has(key)) classes.push("is-target");
+
+    const sign = value.sign();
+    const absValue = value.abs();
+    let prefix = "";
+
+    if (!hasVisibleTerm) {
+      if (sign < 0) prefix = "−";
+    } else {
+      prefix = sign < 0 ? "− " : "+ ";
+    }
+
+    let coefficient = "";
+    if (value.isZero()) coefficient = "0 · ";
+    else if (!absValue.isOne()) coefficient = `${absValue.toString()} · `;
+
+    pieces.push(`<span class="${classes.join(" ")}">${prefix}${coefficient}${VARIABLE_NAMES[c]}</span>`);
+    hasVisibleTerm = true;
+  }
+
+  if (!pieces.length) return '<span class="gauss-equation-term">0</span>';
+  return pieces.join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// Ereignisse
+// ---------------------------------------------------------------------------
+
+function bindStageEvents() {
+  stage.querySelectorAll("input[data-row][data-col]").forEach(input => {
+    input.addEventListener("input", updateInputValue);
+  });
+
+  const confirmButton = document.getElementById("confirmInputButton");
+  if (confirmButton) confirmButton.addEventListener("click", confirmInput);
+
+  stage.querySelectorAll("button[data-option-index]").forEach(button => {
+    button.addEventListener("click", () => selectOption(Number(button.dataset.optionIndex)));
+  });
+
+  const feedbackContinue = document.getElementById("feedbackContinueButton");
+  if (feedbackContinue) feedbackContinue.addEventListener("click", closeFeedback);
+}
+
+equationViewButton.addEventListener("click", () => {
+  viewMode = "equation";
+  render();
 });
 
-renderStep();
+matrixViewButton.addEventListener("click", () => {
+  viewMode = "matrix";
+  render();
+});
+
+restartButton.addEventListener("click", resetState);
+
+stage.addEventListener("keydown", event => {
+  if (screen === "input" && event.key === "Enter" && event.target.matches("input")) {
+    event.preventDefault();
+    confirmInput();
+  }
+});
+
+function escapeHTML(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+render();
