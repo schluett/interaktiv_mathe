@@ -177,14 +177,30 @@ function applyOperations(target, operations) {
   });
 }
 
-// Zähler für skalare Rechenoperationen auf der erweiterten Matrix.
-// Bei einer Zeilenaddition werden pro Eintrag eine Multiplikation und
-// eine Addition/Subtraktion gezählt; bei einer Skalierung eine Multiplikation.
-// Ein Zeilentausch enthält keine arithmetische Rechenoperation.
-function arithmeticCost(operations) {
+// Zähler für arithmetische Rechenoperationen analog zur Herleitung
+// auf den Folien.
+//
+// Ab der aktuellen Pivotspalte werden nur noch die tatsächlich relevanten
+// Einträge bis einschließlich der rechten Seite gezählt.
+// Beispiel bei n = 3:
+//   Pivot 1: 4 relevante Einträge
+//   Pivot 2: 3 relevante Einträge
+//   Pivot 3: 2 relevante Einträge
+//
+// Eliminierung: je relevantem Eintrag
+//   1 Multiplikation + 1 Addition/Subtraktion = 2 Operationen.
+// Pivot-Normierung: je relevantem Eintrag 1 Operation.
+// Zeilentausch: 0 arithmetische Operationen.
+//
+// Damit ist bei vollständiger Reduktion bis zur Einheitsmatrix maximal
+//   n^3 + (5/2)n^2 - (3/2)n
+// zu zählen; für n = 3 also maximal 45.
+function arithmeticCost(operations, pivotCol) {
+  const relevantEntries = COLS - pivotCol;
+
   return operations.reduce((total, operation) => {
-    if (operation.kind === "scale") return total + COLS;
-    if (operation.kind === "add") return total + 2 * COLS;
+    if (operation.kind === "scale") return total + relevantEntries;
+    if (operation.kind === "add") return total + 2 * relevantEntries;
     return total;
   }, 0);
 }
@@ -426,6 +442,7 @@ function makeScalePlan(pivotRow, pivotCol, pivot) {
 
   return {
     type: "scale",
+    pivotCol,
     phase: "Vorwärtselimination",
     goal: `Pivot in Spalte ${pivotCol + 1} auf 1 normieren`,
     prompt: "Welcher Schritt erzeugt an der Pivotposition eine 1?",
@@ -486,6 +503,7 @@ function makeEliminationPlan(pivotRow, pivotCol, targetRows, direction) {
 
   return {
     type: direction === "below" ? "eliminate-below" : "eliminate-above",
+    pivotCol,
     phase,
     goal: `Einträge ${where} des Pivots in Spalte ${pivotCol + 1} zu 0 machen`,
     prompt: "Welche Operation beseitigt die markierten Einträge in einem Schritt?",
@@ -584,7 +602,7 @@ function selectOption(index) {
   stateHistory.push(snapshotState());
 
   applyOperations(matrix, option.operations);
-  operationCount += arithmeticCost(option.operations);
+  operationCount += arithmeticCost(option.operations, currentPlan.pivotCol);
   operationHistory.push(currentPlan.correctLabel);
   stepNumber += 1;
   currentPlan = nextPlan();
